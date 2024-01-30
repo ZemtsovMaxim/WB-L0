@@ -28,7 +28,7 @@ func main() {
 	// Подключение к серверу NATS Streaming
 	clusterID := "your-cluster-id" // Замените на фактический идентификатор вашего кластера
 	clientID := "your-client-id"
-	natsURL := os.Getenv("NATS_URL")
+	natsURL := os.Getenv("nats://localhost:4222")
 
 	// Подключение к NATS Streaming
 	sc, err := stan.Connect(clusterID, clientID, stan.NatsURL(natsURL))
