@@ -1,0 +1,37 @@
+version: '3'
+
+services:
+  nats-streaming:
+    image: nats-streaming
+    ports:
+      - '4222:4222'
+      - '8222:8222'
+    networks:
+      - my-network
+
+  postgres:
+    image: postgres
+    environment:
+      POSTGRES_USER: My_user
+      POSTGRES_PASSWORD: 1234554321
+      POSTGRES_DB: My_db
+    ports:
+      - '5432:5432'
+    networks:
+      - my-network
+    volumes:
+      - ./init-scripts:/docker-entrypoint-initdb.d
+
+  go-server:
+    build:
+      context: .
+    ports:
+      - '8080:8080'
+    depends_on:
+      - nats-streaming
+      - postgres
+    networks:
+      - my-network
+
+networks:
+  my-network:
