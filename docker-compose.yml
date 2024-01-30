@@ -7,7 +7,7 @@ services:
       - '4222:4222'
       - '8222:8222'
     environment:
-      - NATS_CLUSTER_ID=cluster-id
+      - NATS_CLUSTER_ID = test-cluster
     networks:
       - my-network
 

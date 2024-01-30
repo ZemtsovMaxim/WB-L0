@@ -29,7 +29,7 @@ var (
 func main() {
 	// Подключение к серверу NATS Streaming
 	clusterID := "test-cluster" // Замените на фактический идентификатор вашего кластера
-	clientID := "your-client-id"
+	clientID := "client-id"
 
 	var err error
 	sc, err = stan.Connect(clusterID, clientID)

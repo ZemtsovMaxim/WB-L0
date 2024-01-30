@@ -10,7 +10,7 @@ import (
 
 func PublishDataToNATS() {
 	// Подключение к серверу NATS Streaming
-	clusterID := "cluster-id" // Замените на фактический идентификатор вашего кластера
+	clusterID := "test-cluster" // Замените на фактический идентификатор вашего кластера
 	clientID := "client-id"
 
 	sc, err := stan.Connect(clusterID, clientID)
