@@ -1,4 +1,4 @@
-module main
+module WB-L0
 
 go 1.21.3
 

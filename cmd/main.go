@@ -4,12 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 
+	_ "github.com/lib/pq"
 	"github.com/nats-io/stan.go"
 )
 
@@ -22,26 +22,27 @@ type OrderData struct {
 var (
 	cache     map[string]OrderData
 	cacheLock sync.RWMutex
+	db        *sql.DB
+	sc        stan.Conn
 )
 
 func main() {
 	// Подключение к серверу NATS Streaming
-	clusterID := "your-cluster-id" // Замените на фактический идентификатор вашего кластера
+	clusterID := "test-cluster" // Замените на фактический идентификатор вашего кластера
 	clientID := "your-client-id"
-	natsURL := os.Getenv("nats://localhost:4222")
 
-	// Подключение к NATS Streaming
-	sc, err := stan.Connect(clusterID, clientID, stan.NatsURL(natsURL))
+	var err error
+	sc, err = stan.Connect(clusterID, clientID)
 	if err != nil {
-		log.Fatalf("Error connecting to NATS Streaming: %v", err)
+		log.Printf("Error connecting to NATS Streaming: %v", err)
 	}
 	defer sc.Close()
 
 	// Подключение к базе данных PostgreSQL
 	pgURL := os.Getenv("POSTGRES_URL")
-	db, err := sql.Open("postgres", pgURL)
+	db, err = sql.Open("postgres", pgURL)
 	if err != nil {
-		log.Fatalf("Error connecting to the database: %v", err)
+		log.Printf("Error connecting to the database: %v", err)
 	}
 	defer db.Close()
 
@@ -49,67 +50,18 @@ func main() {
 	cache = make(map[string]OrderData)
 
 	// Загрузка кэша из базы данных
-	loadCacheFromDB(db)
-
-	// Обработчик сообщений NATS Streaming
-	msgHandler := func(msg *stan.Msg) {
-		var orderData OrderData
-
-		err := json.Unmarshal(msg.Data, &orderData)
-		if err != nil {
-			log.Printf("Error decoding JSON: %v", err)
-			return
-		}
-
-		// Обновление кэша
-		cacheLock.Lock()
-		cache[orderData.OrderUID] = orderData
-		cacheLock.Unlock()
-
-		// Сохранение данных в базе данных
-		_, err = db.Exec("INSERT INTO orders (order_uid, data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET data = EXCLUDED.data", orderData.OrderUID, msg.Data)
-		if err != nil {
-			log.Printf("Error inserting data into the database: %v", err)
-			return
-		}
-
-		log.Printf("Received, inserted, and cached a message: %s", msg.Data)
-	}
+	loadCacheFromDB()
 
 	// Подписка на канал
-	channel := "your-channel"
-	sub, err := sc.Subscribe(channel, msgHandler, stan.DurableName("your-durable-name"))
+	channel := "my_channel"
+	sub, err := sc.Subscribe(channel, msgHandler)
 	if err != nil {
-		log.Fatalf("Error subscribing to channel: %v", err)
+		log.Printf("Error subscribing to channel: %v", err)
 	}
+	stan.DurableName("your-durable-name")
 	defer sub.Close()
 
 	log.Printf("Subscribed to channel: %s", channel)
-
-	// HTTP-обработчик
-	http.HandleFunc("/order", func(w http.ResponseWriter, r *http.Request) {
-		orderUID := r.URL.Query().Get("order_uid")
-
-		cacheLock.RLock()
-		orderData, ok := cache[orderUID]
-		cacheLock.RUnlock()
-
-		if ok {
-			w.WriteHeader(http.StatusOK)
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(orderData)
-		} else {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Order not found"))
-		}
-	})
-
-	// Запуск HTTP-сервера
-	go func() {
-		if err := http.ListenAndServe(":8080", nil); err != nil {
-			log.Fatalf("HTTP server error: %v", err)
-		}
-	}()
 
 	// Ожидание сигналов завершения
 	signalCh := make(chan os.Signal, 1)
@@ -119,11 +71,36 @@ func main() {
 	log.Println("Shutting down...")
 }
 
+// Обработчик сообщений NATS Streaming
+func msgHandler(msg *stan.Msg) {
+	var orderData OrderData
+
+	err := json.Unmarshal(msg.Data, &orderData)
+	if err != nil {
+		log.Printf("Error decoding JSON: %v", err)
+		return
+	}
+
+	// Обновление кэша
+	cacheLock.Lock()
+	cache[orderData.OrderUID] = orderData
+	cacheLock.Unlock()
+
+	// Сохранение данных в базе данных
+	_, err = db.Exec("INSERT INTO orders (order_uid, data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET data = EXCLUDED.data", orderData.OrderUID, msg.Data)
+	if err != nil {
+		log.Printf("Error inserting data into the database: %v", err)
+		return
+	}
+
+	log.Printf("Received, inserted, and cached a message: %s", msg.Data)
+}
+
 // Загрузка кэша из базы данных
-func loadCacheFromDB(db *sql.DB) {
+func loadCacheFromDB() {
 	rows, err := db.Query("SELECT order_uid, data FROM orders")
 	if err != nil {
-		log.Fatalf("Error querying data from the database: %v", err)
+		log.Printf("Error querying data from the database: %v", err)
 	}
 	defer rows.Close()
 

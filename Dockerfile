@@ -17,4 +17,4 @@ WORKDIR /app/cmd
 RUN go build -o main .
 
 # Запустите приложение при старте контейнера
-CMD ["/app/cmd/main"]
+CMD sleep 10 && /app/cmd/main
