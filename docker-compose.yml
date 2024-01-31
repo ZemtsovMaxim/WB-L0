@@ -6,8 +6,10 @@ services:
     ports:
       - '4222:4222'
       - '8222:8222'
-    environment:
-      - NATS_CLUSTER_ID = test-cluster
+    volumes:
+      - ./nats-streaming-config.conf:/etc/nats-streaming/nats-streaming-config.conf
+      - ./datastore:/datastore
+
     networks:
       - my-network
 

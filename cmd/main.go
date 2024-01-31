@@ -32,14 +32,14 @@ func main() {
 	clientID := "client-id"
 
 	var err error
-	sc, err = stan.Connect(clusterID, clientID)
+	sc, err = stan.Connect(clusterID, clientID, stan.NatsURL("nats://nats-streaming:4222"))
 	if err != nil {
 		log.Printf("Error connecting to NATS Streaming: %v", err)
 	}
 	defer sc.Close()
 
 	// Подключение к базе данных PostgreSQL
-	pgURL := os.Getenv("POSTGRES_URL")
+	pgURL := os.Getenv("postgres://My_user:1234554321@postgres:8080/My_db?sslmode=disable")
 	db, err = sql.Open("postgres", pgURL)
 	if err != nil {
 		log.Printf("Error connecting to the database: %v", err)
@@ -54,13 +54,11 @@ func main() {
 
 	// Подписка на канал
 	channel := "my_channel"
-	sub, err := sc.Subscribe(channel, msgHandler)
+	sub, err := sc.Subscribe(channel, msgHandler, stan.DurableName("your-durable-name"))
 	if err != nil {
 		log.Printf("Error subscribing to channel: %v", err)
 	}
-	stan.DurableName("your-durable-name")
 	defer sub.Close()
-
 	log.Printf("Subscribed to channel: %s", channel)
 
 	// Ожидание сигналов завершения
