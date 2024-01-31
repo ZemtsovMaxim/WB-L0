@@ -9,7 +9,6 @@ services:
     volumes:
       - ./nats-streaming-config.conf:/etc/nats-streaming/nats-streaming-config.conf
       - ./datastore:/datastore
-
     networks:
       - my-network
 
@@ -25,7 +24,6 @@ services:
       - my-network
     volumes:
       - ./init-scripts:/docker-entrypoint-initdb.d
-
   go-server:
     build:
       context: .

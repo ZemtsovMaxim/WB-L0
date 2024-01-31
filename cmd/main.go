@@ -39,7 +39,7 @@ func main() {
 	defer sc.Close()
 
 	// Подключение к базе данных PostgreSQL
-	pgURL := os.Getenv("postgres://My_user:1234554321@postgres:8080/My_db?sslmode=disable")
+	pgURL := "postgres://My_user:1234554321@clair_postgres:5432/My_db?sslmode=disable"
 	db, err = sql.Open("postgres", pgURL)
 	if err != nil {
 		log.Printf("Error connecting to the database: %v", err)
