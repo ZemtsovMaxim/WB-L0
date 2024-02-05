@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/nats-io/stan.go"
@@ -39,20 +40,22 @@ func main() {
 	defer sc.Close()
 
 	// Подключение к базе данных PostgreSQL
-	pgURL := "postgres://My_user:1234554321@clair_postgres:5432/My_db?sslmode=disable"
+	pgURL := "postgres://My_user:1234554321@172.19.0.2:5432/postgres?sslmode=disable"
 	db, err = sql.Open("postgres", pgURL)
 	if err != nil {
 		log.Printf("Error connecting to the database: %v", err)
 	}
 	defer db.Close()
+	time.Sleep(time.Second * 5)
 
 	// Инициализация кэша
 	cache = make(map[string]OrderData)
 
 	// Загрузка кэша из базы данных
 	loadCacheFromDB()
+	time.Sleep(time.Second * 5)
 
-	// Подписка на канал
+	// Подписка на канал 172.19.0.2
 	channel := "my_channel"
 	sub, err := sc.Subscribe(channel, msgHandler, stan.DurableName("your-durable-name"))
 	if err != nil {
@@ -99,6 +102,7 @@ func loadCacheFromDB() {
 	rows, err := db.Query("SELECT order_uid, data FROM orders")
 	if err != nil {
 		log.Printf("Error querying data from the database: %v", err)
+		return
 	}
 	defer rows.Close()
 
@@ -119,5 +123,9 @@ func loadCacheFromDB() {
 		cacheLock.Lock()
 		cache[orderUID] = orderData
 		cacheLock.Unlock()
+	}
+
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating over rows: %v", err)
 	}
 }

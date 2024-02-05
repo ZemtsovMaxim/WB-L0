@@ -24,6 +24,11 @@ services:
       - my-network
     volumes:
       - ./init-scripts:/docker-entrypoint-initdb.d
+    command:
+      - 'postgres'
+      - '-c'
+      - 'log_statement=all'
+
   go-server:
     build:
       context: .
