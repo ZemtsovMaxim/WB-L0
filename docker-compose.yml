@@ -20,14 +20,15 @@ services:
       POSTGRES_DB: My_db
     ports:
       - '5432:5432'
-    networks:
-      - my-network
     volumes:
       - ./init-scripts:/docker-entrypoint-initdb.d
     command:
       - 'postgres'
       - '-c'
       - 'log_statement=all'
+    networks:
+      my-network:
+        ipv4_address: 172.19.0.2 
 
   go-server:
     build:
@@ -42,3 +43,7 @@ services:
 
 networks:
   my-network:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.19.0.0/24
