@@ -1,4 +1,3 @@
-RAISE NOTICE 'Creating database My_db';
 CREATE DATABASE My_db;
 
 -- Подключение к новой базе данных
