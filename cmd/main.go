@@ -16,8 +16,8 @@ import (
 
 // OrderData - структура для хранения данных о заказе
 type OrderData struct {
-	OrderUID string `json:"order_uid"`
-	// Добавьте другие поля из вашей модели данных
+	OrderUID      string          `json:"order_uid"`
+	OrderDataJSON json.RawMessage `json:"order_data"`
 }
 
 var (
@@ -88,18 +88,16 @@ func msgHandler(msg *stan.Msg) {
 	cacheLock.Unlock()
 
 	// Сохранение данных в базе данных
-	_, err = db.Exec("INSERT INTO orders (order_uid, data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET data = EXCLUDED.data", orderData.OrderUID, msg.Data)
+	_, err = db.Exec("INSERT INTO orders (order_uid, order_data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET order_data = EXCLUDED.order_data", orderData.OrderUID, msg.Data)
 	if err != nil {
 		log.Printf("Error inserting data into the database: %v", err)
 		return
 	}
-
-	log.Printf("Received, inserted, and cached a message: %s", msg.Data)
 }
 
 // Загрузка кэша из базы данных
 func loadCacheFromDB() {
-	rows, err := db.Query("SELECT order_uid, data FROM orders")
+	rows, err := db.Query("SELECT order_uid, order_data FROM orders")
 	if err != nil {
 		log.Printf("Error querying data from the database: %v", err)
 		return
