@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -14,14 +15,14 @@ import (
 	"github.com/nats-io/stan.go"
 )
 
-// OrderData - структура для хранения данных о заказе
-type OrderData struct {
-	OrderUID string `json:"order_uid"`
-	// Добавьте другие поля из вашей модели данных
+// OrderDB - структура для хранения данных о заказе в базе данных
+type OrderDB struct {
+	OrderUID  string `json:"order_uid"`
+	OrderData string `json:"order_data"`
 }
 
 var (
-	cache     map[string]OrderData
+	cache     map[string]OrderDB
 	cacheLock sync.RWMutex
 	db        *sql.DB
 	sc        stan.Conn
@@ -29,7 +30,7 @@ var (
 
 func main() {
 	// Подключение к серверу NATS Streaming
-	clusterID := "test-cluster" // Замените на фактический идентификатор вашего кластера
+	clusterID := "test-cluster"
 	clientID := "client-id"
 
 	var err error
@@ -49,7 +50,7 @@ func main() {
 	time.Sleep(time.Second * 5)
 
 	// Инициализация кэша
-	cache = make(map[string]OrderData)
+	cache = make(map[string]OrderDB)
 
 	// Загрузка кэша из базы данных
 	loadCacheFromDB()
@@ -62,44 +63,75 @@ func main() {
 		log.Printf("Error subscribing to channel: %v", err)
 	}
 	defer sub.Close()
-	log.Printf("Subscribed to channel: %s", channel)
+	log.Printf("Subscribed to channel")
+
+	// Добавьте обработчик HTTP-запросов
+	http.HandleFunc("/order", getOrderHandler)
+
+	// Запуск HTTP-сервера
+	log.Fatal(http.ListenAndServe(":8080", nil))
 
 	// Ожидание сигналов завершения
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
-	<-signalCh
+
+	// Ожидание сигналов или завершение по Ctrl+C
+	select {
+	case sig := <-signalCh:
+		log.Printf("Received signal: %v", sig)
+		shutdown()
+	}
 
 	log.Println("Shutting down...")
 }
 
 // Обработчик сообщений NATS Streaming
 func msgHandler(msg *stan.Msg) {
-	var orderData OrderData
+	var orderDB OrderDB
 
-	err := json.Unmarshal(msg.Data, &orderData)
+	err := json.Unmarshal(msg.Data, &orderDB)
 	if err != nil {
 		log.Printf("Error decoding JSON: %v", err)
 		return
 	}
 
+	// Заполните поле OrderData данными из msg.Data
+	orderDB.OrderData = string(msg.Data)
+
 	// Обновление кэша
 	cacheLock.Lock()
-	cache[orderData.OrderUID] = orderData
+	cache[orderDB.OrderUID] = orderDB
 	cacheLock.Unlock()
 
+	printCache()
+
 	// Сохранение данных в базе данных
-	_, err = db.Exec("INSERT INTO orders (order_uid, data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET data = EXCLUDED.data", orderData.OrderUID, msg.Data)
+	_, err = db.Exec("INSERT INTO orders (order_uid, order_data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET order_data = EXCLUDED.order_data", orderDB.OrderUID, orderDB.OrderData)
 	if err != nil {
-		log.Printf("Error inserting data into the database: %v", err)
+		log.Printf("Error inserting data into the database: %v. Data: %s", err, msg.Data)
 		return
 	}
 
 	log.Printf("Received, inserted, and cached a message: %s", msg.Data)
 }
 
+// Вставка или обновление данных заказа в базе данных
+func insertOrUpdateOrder(orderUID, orderData string) error {
+	_, err := db.Exec("INSERT INTO orders (order_uid, order_data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET order_data = EXCLUDED.order_data", orderUID, orderData)
+	return err
+}
+
+// Завершение работы, чистка и закрытие ресурсов
+func shutdown() {
+	log.Println("Shutting down...")
+	sc.Close()
+	db.Close()
+	os.Exit(0)
+}
+
 // Загрузка кэша из базы данных
 func loadCacheFromDB() {
-	rows, err := db.Query("SELECT order_uid, data FROM orders")
+	rows, err := db.Query("SELECT order_uid, order_data FROM orders")
 	if err != nil {
 		log.Printf("Error querying data from the database: %v", err)
 		return
@@ -108,24 +140,69 @@ func loadCacheFromDB() {
 
 	for rows.Next() {
 		var orderUID string
-		var dataJSON []byte
-		if err := rows.Scan(&orderUID, &dataJSON); err != nil {
+		var orderDataStr string
+		if err := rows.Scan(&orderUID, &orderDataStr); err != nil {
 			log.Printf("Error scanning data from the database: %v", err)
 			continue
 		}
 
-		var orderData OrderData
-		if err := json.Unmarshal(dataJSON, &orderData); err != nil {
-			log.Printf("Error decoding JSON from the database: %v", err)
+		var orderDB OrderDB
+		if err := json.Unmarshal([]byte(orderDataStr), &orderDB); err != nil {
+			log.Printf("Error decoding JSON from the database for orderUID %s: %v. JSON data: %s", orderUID, err, orderDataStr)
 			continue
 		}
 
 		cacheLock.Lock()
-		cache[orderUID] = orderData
+		cache[orderDB.OrderUID] = orderDB
 		cacheLock.Unlock()
+
+		log.Printf("Loaded order from DB to cache: %v", orderDB)
 	}
 
 	if err := rows.Err(); err != nil {
 		log.Printf("Error iterating over rows: %v", err)
+	}
+}
+
+func getOrderHandler(w http.ResponseWriter, r *http.Request) {
+	// Получение значения параметра order_uid из URL
+	orderUID := r.URL.Query().Get("order_uid")
+
+	log.Printf("Received HTTP request for order_uid: %s", orderUID)
+
+	// Поиск заказа в кэше
+	cacheLock.RLock()
+	orderDB, ok := cache[orderUID]
+	cacheLock.RUnlock()
+
+	if !ok {
+		// Если заказ не найден, отправить ответ с кодом 404
+		log.Printf("Order not found for order_uid: %s", orderUID)
+		http.NotFound(w, r)
+		return
+	}
+
+	printCache()
+
+	// Преобразование данных заказа в JSON
+	orderJSON, err := json.Marshal(orderDB)
+	if err != nil {
+		log.Printf("Error encoding JSON: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Отправка данных в ответе
+	log.Printf("Sending JSON response for order_uid: %s", orderUID)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(orderJSON)
+}
+func printCache() {
+	cacheLock.RLock()
+	defer cacheLock.RUnlock()
+
+	log.Println("Cache Contents:")
+	for key, value := range cache {
+		log.Printf("Key: %s, Value: %+v", key, value)
 	}
 }
