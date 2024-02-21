@@ -6,8 +6,7 @@ require github.com/nats-io/stan.go v0.10.4
 
 require (
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/hartwork/go-wait-for-it v1.0.0 // indirect
-	github.com/inconshreveable/mousetrap v1.0.0 // indirect
+	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/klauspost/compress v1.17.5 // indirect
 	github.com/lib/pq v1.10.9 // indirect
 	github.com/lithammer/dedent v1.1.0 // indirect
