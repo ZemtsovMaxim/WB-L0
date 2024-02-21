@@ -1,6 +1,6 @@
 CREATE DATABASE My_db;
 
--- Подключение к новой базе данных
+-- Подключение к базе данных
 \connect My_db;
 
 CREATE USER My_user WITH PASSWORD '1234554321';
