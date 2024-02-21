@@ -15,6 +15,7 @@ import (
 	"github.com/nats-io/stan.go"
 )
 
+
 // OrderDB - структура для хранения данных о заказе в базе данных
 type OrderDB struct {
 	OrderUID  string `json:"order_uid"`
@@ -114,7 +115,17 @@ func msgHandler(msg *stan.Msg) {
 
 	printCache()
 
+<<<<<<< HEAD
 	log.Printf("Loaded order from DB to cache: %v", orderDB)
+=======
+	// Сохранение данных в базе данных
+	_, err = db.Exec("INSERT INTO orders (order_uid, order_data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET order_data = EXCLUDED.order_data", orderDB.OrderUID, orderDB.OrderData)
+
+	if err != nil {
+		log.Printf("Error inserting data into the database: %v. Data: %s", err, msg.Data)
+		return
+	}
+>>>>>>> 9a91c87a47c0350264e3a1ae2b366d26bdd3a7d6
 }
 
 // Вставка или обновление данных заказа в базе данных
