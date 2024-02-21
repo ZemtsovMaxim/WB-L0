@@ -50,13 +50,6 @@ func main() {
 	defer db.Close()
 	time.Sleep(time.Second * 5)
 
-	// Инициализация кэша
-	cache = make(map[string]OrderDB)
-
-	// Загрузка кэша из базы данных
-	loadCacheFromDB()
-	time.Sleep(time.Second * 5)
-
 	// Подписка на канал 172.19.0.2
 	channel := "my_channel"
 	sub, err := sc.Subscribe(channel, msgHandler, stan.DurableName("your-durable-name"))
@@ -66,11 +59,19 @@ func main() {
 	defer sub.Close()
 	log.Printf("Subscribed to channel")
 
+	// Инициализация кэша
+	cache = make(map[string]OrderDB)
+
+	// Загрузка кэша из базы данных
+	loadCacheFromDB()
+	time.Sleep(time.Second * 5)
+
 	// Добавьте обработчик HTTP-запросов
 	http.HandleFunc("/order", getOrderHandler)
 
-	// Запуск HTTP-сервера
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	go func() {
+		log.Fatal(http.ListenAndServe(":8080", nil))
+	}()
 
 	// Ожидание сигналов завершения
 	signalCh := make(chan os.Signal, 1)
@@ -96,8 +97,16 @@ func msgHandler(msg *stan.Msg) {
 		return
 	}
 
+	log.Printf("Decoded order from JSON: %v", orderDB)
+
 	// Заполните поле OrderData данными из msg.Data
 	orderDB.OrderData = string(msg.Data)
+
+	// Вставка или обновление данных заказа в базе данных
+	if err := insertOrUpdateOrder(orderDB.OrderUID, orderDB.OrderData); err != nil {
+		log.Printf("Error inserting or updating order in the database: %v", err)
+		return
+	}
 
 	// Обновление кэша
 	cacheLock.Lock()
@@ -106,6 +115,9 @@ func msgHandler(msg *stan.Msg) {
 
 	printCache()
 
+<<<<<<< HEAD
+	log.Printf("Loaded order from DB to cache: %v", orderDB)
+=======
 	// Сохранение данных в базе данных
 	_, err = db.Exec("INSERT INTO orders (order_uid, order_data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET order_data = EXCLUDED.order_data", orderDB.OrderUID, orderDB.OrderData)
 
@@ -113,11 +125,19 @@ func msgHandler(msg *stan.Msg) {
 		log.Printf("Error inserting data into the database: %v. Data: %s", err, msg.Data)
 		return
 	}
+>>>>>>> 9a91c87a47c0350264e3a1ae2b366d26bdd3a7d6
 }
 
 // Вставка или обновление данных заказа в базе данных
 func insertOrUpdateOrder(orderUID, orderData string) error {
-	_, err := db.Exec("INSERT INTO orders (order_uid, order_data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET order_data = EXCLUDED.order_data", orderUID, orderData)
+	// Проверяем, является ли orderData корректным JSON
+	var orderDataJSON map[string]interface{}
+	if err := json.Unmarshal([]byte(orderData), &orderDataJSON); err != nil {
+		return err
+	}
+
+	// Если JSON корректен, выполняем запрос в базу данных
+	_, err := db.Exec("INSERT INTO orders (order_uid, order_data) VALUES ($1, $2::jsonb) ON CONFLICT (order_uid) DO UPDATE SET order_data = EXCLUDED.order_data::jsonb", orderUID, orderData)
 	return err
 }
 
@@ -138,6 +158,9 @@ func loadCacheFromDB() {
 	}
 	defer rows.Close()
 
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+
 	for rows.Next() {
 		var orderUID string
 		var orderDataStr string
@@ -146,17 +169,14 @@ func loadCacheFromDB() {
 			continue
 		}
 
+		log.Printf("Scanning data from the database. OrderUID: %s, OrderData: %s", orderUID, orderDataStr)
+
 		var orderDB OrderDB
-		if err := json.Unmarshal([]byte(orderDataStr), &orderDB); err != nil {
-			log.Printf("Error decoding JSON from the database for orderUID %s: %v. JSON data: %s", orderUID, err, orderDataStr)
-			continue
-		}
+		orderDB.OrderUID = orderUID
+		orderDB.OrderData = orderDataStr
 
-		cacheLock.Lock()
 		cache[orderDB.OrderUID] = orderDB
-		cacheLock.Unlock()
-
-		log.Printf("Loaded order from DB to cache: %v", orderDB)
+		log.Printf("Loaded order from DB to cache: %+v", orderDB)
 	}
 
 	if err := rows.Err(); err != nil {
