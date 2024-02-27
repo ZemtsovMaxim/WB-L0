@@ -15,10 +15,7 @@ import (
 	"github.com/nats-io/stan.go"
 )
 
-<<<<<<< HEAD
-=======
 
->>>>>>> 86cc71e75e230c81ed7c93c5869ece6b43bb0129
 // OrderDB - структура для хранения данных о заказе в базе данных
 type OrderDB struct {
 	OrderUID  string `json:"order_uid"`
@@ -30,64 +27,88 @@ var (
 	cacheLock sync.RWMutex
 	db        *sql.DB
 	sc        stan.Conn
+	sub       stan.Subscription
+)
+
+var (
+	clusterID = "test-cluster"
+	clientID  = "client-id"
+	NatsURL   = "nats://nats-streaming:4222"
+	pgURL     = "postgres://My_user:1234554321@172.19.0.2:5432/My_db?sslmode=disable"
+	channel   = "my_channel"
 )
 
 func main() {
-	// Подключение к серверу NATS Streaming
-	clusterID := "test-cluster"
-	clientID := "client-id"
 
-	var err error
-	sc, err = stan.Connect(clusterID, clientID, stan.NatsURL("nats://nats-streaming:4222"))
-	if err != nil {
-		log.Printf("Error connecting to NATS Streaming: %v", err)
-	}
-	defer sc.Close()
-
-	// Подключение к базе данных PostgreSQL
-	pgURL := "postgres://My_user:1234554321@172.19.0.2:5432/My_db?sslmode=disable"
-	db, err = sql.Open("postgres", pgURL)
-	if err != nil {
-		log.Printf("Error connecting to the database: %v", err)
-	}
-	defer db.Close()
+	connectToDB(pgURL)
 	time.Sleep(time.Second * 5)
 
-	// Подписка на канал 172.19.0.2
-	channel := "my_channel"
-	sub, err := sc.Subscribe(channel, msgHandler, stan.DurableName("your-durable-name"))
-	if err != nil {
-		log.Printf("Error subscribing to channel: %v", err)
-	}
-	defer sub.Close()
-	log.Printf("Subscribed to channel")
+	connectToNuts(NatsURL)
 
-	// Инициализация кэша
 	cache = make(map[string]OrderDB)
 
-	// Загрузка кэша из базы данных
 	loadCacheFromDB()
 	time.Sleep(time.Second * 5)
 
-	// Добавьте обработчик HTTP-запросов
+	subscribeOnChannel(channel)
+
+	processingHTTP()
+
+	shutDown()
+}
+func processingHTTP() {
 	http.HandleFunc("/order", getOrderHandler)
 
 	go func() {
-		log.Fatal(http.ListenAndServe(":8080", nil))
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Fatalf("Ошибка HTTP-сервера: %v", err)
+		}
 	}()
+}
 
-	// Ожидание сигналов завершения
+func shutDown() {
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Ожидание сигналов или завершение по Ctrl+C
 	select {
 	case sig := <-signalCh:
 		log.Printf("Received signal: %v", sig)
-		shutdown()
+		closeAll()
 	}
 
 	log.Println("Shutting down...")
+}
+
+func subscribeOnChannel(channel string) (stan.Subscription, error) {
+	var err error
+	sub, err = sc.Subscribe(channel, msgHandler, stan.DurableName("my-application"))
+	if err != nil {
+		log.Printf("Error subscribing to channel: %v", err)
+		return nil, err
+	}
+	log.Printf("Subscribed to channel")
+	return sub, nil
+}
+
+func connectToDB(pgURL string) (*sql.DB, error) {
+	var err error
+	db, err = sql.Open("postgres", pgURL)
+	if err != nil {
+		log.Printf("Error connecting to the database: %v", err)
+		return nil, err
+	}
+	log.Printf("Connected to DB")
+	return db, nil
+}
+
+func connectToNuts(NatsURL string) (stan.Conn, error) {
+	var err error
+	sc, err = stan.Connect(clusterID, clientID, stan.NatsURL(NatsURL))
+	if err != nil {
+		log.Printf("Error connecting to NATS Streaming: %v", err)
+		return nil, err
+	}
+	return sc, nil
 }
 
 // Обработчик сообщений NATS Streaming
@@ -102,25 +123,17 @@ func msgHandler(msg *stan.Msg) {
 
 	log.Printf("Decoded order from JSON: %v", orderDB)
 
-	// Заполните поле OrderData данными из msg.Data
 	orderDB.OrderData = string(msg.Data)
 
-	// Вставка или обновление данных заказа в базе данных
 	if err := insertOrUpdateOrder(orderDB.OrderUID, orderDB.OrderData); err != nil {
 		log.Printf("Error inserting or updating order in the database: %v", err)
 		return
 	}
 
-	// Обновление кэша
 	cacheLock.Lock()
 	cache[orderDB.OrderUID] = orderDB
 	cacheLock.Unlock()
 
-	printCache()
-
-	log.Printf("Loaded order from DB to cache: %v", orderDB)
-
-	// Сохранение данных в базе данных
 	_, err = db.Exec("INSERT INTO orders (order_uid, order_data) VALUES ($1, $2) ON CONFLICT (order_uid) DO UPDATE SET order_data = EXCLUDED.order_data", orderDB.OrderUID, orderDB.OrderData)
 
 	if err != nil {
@@ -129,28 +142,24 @@ func msgHandler(msg *stan.Msg) {
 	}
 }
 
-// Вставка или обновление данных заказа в базе данных
 func insertOrUpdateOrder(orderUID, orderData string) error {
-	// Проверяем, является ли orderData корректным JSON
+	// Валидация
 	var orderDataJSON map[string]interface{}
 	if err := json.Unmarshal([]byte(orderData), &orderDataJSON); err != nil {
 		return err
 	}
-
-	// Если JSON корректен, выполняем запрос в базу данных
 	_, err := db.Exec("INSERT INTO orders (order_uid, order_data) VALUES ($1, $2::jsonb) ON CONFLICT (order_uid) DO UPDATE SET order_data = EXCLUDED.order_data::jsonb", orderUID, orderData)
 	return err
 }
 
-// Завершение работы, чистка и закрытие ресурсов
-func shutdown() {
+func closeAll() {
 	log.Println("Shutting down...")
-	sc.Close()
 	db.Close()
+	sc.Close()
+	sub.Close()
 	os.Exit(0)
 }
 
-// Загрузка кэша из базы данных
 func loadCacheFromDB() {
 	rows, err := db.Query("SELECT order_uid, order_data FROM orders")
 	if err != nil {
@@ -186,7 +195,6 @@ func loadCacheFromDB() {
 }
 
 func getOrderHandler(w http.ResponseWriter, r *http.Request) {
-	// Получение значения параметра order_uid из URL
 	orderUID := r.URL.Query().Get("order_uid")
 
 	log.Printf("Received HTTP request for order_uid: %s", orderUID)
@@ -197,7 +205,6 @@ func getOrderHandler(w http.ResponseWriter, r *http.Request) {
 	cacheLock.RUnlock()
 
 	if !ok {
-		// Если заказ не найден, отправить ответ с кодом 404
 		log.Printf("Order not found for order_uid: %s", orderUID)
 		http.NotFound(w, r)
 		return
@@ -205,7 +212,6 @@ func getOrderHandler(w http.ResponseWriter, r *http.Request) {
 
 	printCache()
 
-	// Преобразование данных заказа в JSON
 	orderJSON, err := json.Marshal(orderDB)
 	if err != nil {
 		log.Printf("Error encoding JSON: %v", err)
@@ -213,7 +219,6 @@ func getOrderHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Отправка данных в ответе
 	log.Printf("Sending JSON response for order_uid: %s", orderUID)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(orderJSON)
