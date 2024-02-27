@@ -15,6 +15,7 @@ import (
 	"github.com/nats-io/stan.go"
 )
 
+
 // OrderDB - структура для хранения данных о заказе в базе данных
 type OrderDB struct {
 	OrderUID  string `json:"order_uid"`
